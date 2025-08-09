@@ -1,458 +1,465 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Iowa Hold'em - Poker Table</title>
-  <style>
-    body, html {
-      margin: 0; padding: 0; height: 100%;
-      background: radial-gradient(circle at center, #2a2a2a, #121212);
-      color: #eee;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      user-select: none;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: flex-start;
-      min-height: 100vh;
-    }
-
-    h1 {
-      margin-top: 20px;
-      user-select: none;
-    }
-
-    #join-container {
-      margin: 10px 0 20px;
-    }
-
-    #game-container {
-      position: relative;
-      width: 800px;
-      height: 800px;
-      /* let’s keep stacking context */
-    }
-
-    #poker-table {
-      position: absolute;
-      top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      width: 600px; height: 600px;
-      background: linear-gradient(145deg, #006633, #004d26);
-      border-radius: 50%;
-      box-shadow:
-        inset 0 0 40px #003300aa,
-        0 0 30px #009900aa;
-      z-index: 1;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      flex-wrap: wrap;
-      padding: 40px;
-      box-sizing: border-box;
-    }
-
-    /* Player seats on table */
-    .player-seat {
-      position: absolute;
-      width: 140px;
-      height: 80px;
-      background: #1a1a1a;
-      border: 2px solid #339933;
-      border-radius: 12px;
-      box-shadow: 0 0 5px #33cc33aa;
-      text-align: center;
-      padding: 8px;
-      font-size: 14px;
-      cursor: default;
-      transition: transform 0.3s ease;
-      user-select: none;
-    }
-
-    .player-seat.you {
-      border-color: #ffdd55;
-      box-shadow: 0 0 12px #ffdd55;
-      font-weight: bold;
-    }
-
-    .player-name {
-      font-weight: 600;
-      margin-bottom: 4px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .chip-stack {
-      font-size: 13px;
-      color: #ccc;
-      margin-bottom: 4px;
-    }
-
-    .badge {
-      display: inline-block;
-      padding: 2px 6px;
-      font-size: 11px;
-      font-weight: 700;
-      border-radius: 8px;
-      margin: 0 2px;
-      user-select: none;
-    }
-
-    .badge.dealer {
-      background: #ffaa00;
-      color: #220900;
-    }
-
-    .badge.small-blind {
-      background: #22bb22;
-      color: #002200;
-    }
-
-    .badge.big-blind {
-      background: #2288ff;
-      color: #002244;
-    }
-
-    .hand-cards {
-      display: flex;
-      justify-content: center;
-      gap: 5px;
-      margin-top: 5px;
-    }
-
-    .card {
-      width: 28px;
-      height: 40px;
-      border-radius: 4px;
-      background: white;
-      box-shadow: 0 0 4px #0005;
-      color: black;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      font-weight: 700;
-      font-size: 16px;
-      user-select: none;
-      cursor: default;
-      transition: transform 0.15s ease;
-    }
-
-    .card.red {
-      color: red;
-    }
-
-    .card.selected {
-      transform: translateY(-8px);
-      box-shadow: 0 0 8px #ffaa0055;
-      cursor: pointer;
-    }
-
-    #community-cards {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      display: flex;
-      gap: 10px;
-      padding: 10px 20px;
-      background: rgba(0, 0, 0, 0.5);
-      border-radius: 12px;
-      box-shadow: 0 0 10px #33cc33aa;
-      user-select: none;
-      z-index: 2;
-    }
-
-    #community-cards .card {
-      width: 48px;
-      height: 68px;
-      font-size: 28px;
-      box-shadow: 0 0 8px #000a;
-      cursor: default;
-    }
-
-    #pot {
-      position: absolute;
-      top: calc(50% + 100px);
-      left: 50%;
-      transform: translateX(-50%);
-      font-size: 24px;
-      font-weight: 700;
-      color: #aaffaa;
-      text-shadow: 0 0 6px #00aa00bb;
-      user-select: none;
-      pointer-events: none;
-      z-index: 2;
-    }
-
-    #controls {
-      margin-top: 20px;
-      width: 800px;
-      display: flex;
-      justify-content: center;
-      gap: 10px;
-      flex-wrap: wrap;
-      position: relative;
-      z-index: 3; /* on top of table */
-    }
-
-    #controls > * {
-      padding: 8px 12px;
-      font-size: 16px;
-      border-radius: 8px;
-      border: none;
-      cursor: pointer;
-      user-select: none;
-      box-shadow: 0 0 5px #33cc33aa;
-      background: #115511;
-      color: #d0ffd0;
-      transition: background 0.3s ease;
-    }
-
-    #controls > *:hover:not(:disabled) {
-      background: #22cc22;
-      color: #003300;
-    }
-
-    #controls > *:disabled {
-      background: #223322;
-      color: #556655;
-      cursor: not-allowed;
-    }
-
-    #raise-input {
-      width: 80px;
-      font-weight: 700;
-      text-align: center;
-    }
-
-  </style>
+<meta charset="UTF-8" />
+<title>Iowa Hold'em - Poker Table</title>
+<style>
+  body, html {
+    margin: 0; padding: 0; height: 100%;
+    background: radial-gradient(circle at center, #2a2a2a, #121212);
+    color: #eee;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    user-select: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    min-height: 100vh;
+  }
+  h1 {
+    margin-top: 20px;
+    user-select: none;
+  }
+  #join-container {
+    margin: 10px 0 20px;
+  }
+  #game-container {
+    position: relative;
+    width: 800px;
+    height: 800px;
+  }
+  #poker-table {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 600px; height: 600px;
+    background: linear-gradient(145deg, #006633, #004d26);
+    border-radius: 50%;
+    box-shadow:
+      inset 0 0 40px #003300aa,
+      0 0 30px #009900aa;
+    z-index: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 40px;
+    box-sizing: border-box;
+  }
+  .player-seat {
+    position: absolute;
+    width: 140px;
+    height: 80px;
+    background: #1a1a1a;
+    border: 2px solid #339933;
+    border-radius: 12px;
+    box-shadow: 0 0 5px #33cc33aa;
+    text-align: center;
+    padding: 8px;
+    font-size: 14px;
+    cursor: default;
+    transition: transform 0.3s ease;
+    user-select: none;
+  }
+  .player-seat.you {
+    border-color: #ffdd55;
+    box-shadow: 0 0 12px #ffdd55;
+    font-weight: bold;
+  }
+  .current-turn {
+    box-shadow: 0 0 15px 4px #ffdd55;
+    border-color: #ffdd55 !important;
+  }
+  .badge {
+    display: inline-block;
+    background: #ffdd55;
+    color: #222;
+    font-weight: bold;
+    border-radius: 4px;
+    padding: 2px 6px;
+    margin: 0 2px;
+    font-size: 11px;
+    user-select: none;
+  }
+  .dealer { background: #ffbb33; }
+  .small-blind { background: #33cc33; }
+  .big-blind { background: #cc3333; }
+  #community-cards {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    gap: 12px;
+    z-index: 5;
+  }
+  .card {
+    width: 60px;
+    height: 90px;
+    border-radius: 8px;
+    background: white;
+    color: black;
+    font-weight: bold;
+    font-size: 28px;
+    line-height: 90px;
+    text-align: center;
+    box-shadow: 0 2px 6px #00000066;
+    user-select: none;
+  }
+  .card.red { color: red; }
+  .chip-stack {
+    font-size: 13px;
+    margin-top: 4px;
+  }
+  #pot-display {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 22px;
+    font-weight: bold;
+    color: #ffdd55;
+    text-shadow: 0 0 8px #ffdd55bb;
+    user-select: none;
+  }
+  #action-buttons {
+    position: absolute;
+    bottom: 100px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 12px;
+    z-index: 10;
+  }
+  button {
+    padding: 10px 18px;
+    font-size: 16px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    background: #339933;
+    color: white;
+    font-weight: bold;
+    user-select: none;
+    transition: background-color 0.2s ease;
+  }
+  button:hover:not(:disabled) {
+    background: #55cc55;
+  }
+  button:disabled {
+    background: #666666;
+    cursor: default;
+  }
+  #message-log {
+    margin-top: 10px;
+    max-width: 600px;
+    height: 80px;
+    overflow-y: auto;
+    background: #222;
+    border-radius: 8px;
+    padding: 8px;
+    font-size: 14px;
+    color: #eee;
+  }
+  #name-input {
+    padding: 6px 10px;
+    font-size: 16px;
+    border-radius: 6px;
+    border: 2px solid #339933;
+    width: 180px;
+  }
+  #join-btn {
+    padding: 8px 14px;
+    font-size: 16px;
+    border-radius: 6px;
+    border: none;
+    background: #339933;
+    color: white;
+    font-weight: bold;
+    cursor: pointer;
+    user-select: none;
+  }
+  #join-btn:hover {
+    background: #55cc55;
+  }
+  #your-hand {
+    position: absolute;
+    bottom: 180px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 8px;
+    user-select: none;
+  }
+  .your-card {
+    cursor: pointer;
+    border: 2px solid transparent;
+    border-radius: 8px;
+    transition: border-color 0.2s ease;
+    user-select: none;
+  }
+  .your-card.selected {
+    border-color: #ffdd55;
+    box-shadow: 0 0 10px #ffdd55;
+  }
+</style>
 </head>
 <body>
-  <h1>Iowa Hold'em</h1>
 
-  <div id="join-container">
-    <label for="nameInput">Your Name:</label>
-    <input type="text" id="nameInput" autocomplete="off" />
-    <button id="joinBtn">Join Game</button>
+<h1>Iowa Hold'em Poker</h1>
+
+<div id="join-container">
+  <input id="name-input" placeholder="Enter your name" />
+  <button id="join-btn">Join Game</button>
+</div>
+
+<div id="game-container" style="display:none;">
+  <div id="poker-table"></div>
+  <div id="community-cards"></div>
+  <div id="pot-display"></div>
+  <div id="your-hand"></div>
+  <div id="action-buttons">
+    <button id="fold-btn" disabled>Fold</button>
+    <button id="check-btn" disabled>Check</button>
+    <button id="call-btn" disabled>Call</button>
+    <button id="raise-btn" disabled>Raise</button>
+    <input type="number" id="raise-amount" value="2" min="1" style="width:70px;"/>
+    <button id="discard-btn" disabled>Discard Selected</button>
   </div>
+</div>
 
-  <div id="game-container" style="display:none;">
-    <div id="poker-table"></div>
-    <div id="community-cards"></div>
-    <div id="pot"></div>
+<div id="message-log"></div>
 
-    <div id="controls" style="display:none;">
-      <button id="foldBtn">Fold</button>
-      <button id="checkBtn">Check</button>
-      <button id="callBtn">Call</button>
-      <input type="number" id="raise-input" min="1" placeholder="Raise" />
-      <button id="raiseBtn">Raise</button>
-      <button id="discardBtn" disabled>Discard Selected Card</button>
-    </div>
-  </div>
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const socket = io();
 
-  <script src="/socket.io/socket.io.js"></script>
-  <script>
-    const socket = io();
+  const joinContainer = document.getElementById('join-container');
+  const gameContainer = document.getElementById('game-container');
+  const pokerTable = document.getElementById('poker-table');
+  const communityCardsDiv = document.getElementById('community-cards');
+  const potDisplay = document.getElementById('pot-display');
+  const yourHandDiv = document.getElementById('your-hand');
+  const messageLog = document.getElementById('message-log');
 
-    const joinBtn = document.getElementById('joinBtn');
-    const nameInput = document.getElementById('nameInput');
-    const gameContainer = document.getElementById('game-container');
-    const pokerTable = document.getElementById('poker-table');
-    const communityCardsDiv = document.getElementById('community-cards');
-    const potDiv = document.getElementById('pot');
-    const controlsDiv = document.getElementById('controls');
-    const foldBtn = document.getElementById('foldBtn');
-    const checkBtn = document.getElementById('checkBtn');
-    const callBtn = document.getElementById('callBtn');
-    const raiseBtn = document.getElementById('raiseBtn');
-    const raiseInput = document.getElementById('raise-input');
-    const discardBtn = document.getElementById('discardBtn');
+  const foldBtn = document.getElementById('fold-btn');
+  const checkBtn = document.getElementById('check-btn');
+  const callBtn = document.getElementById('call-btn');
+  const raiseBtn = document.getElementById('raise-btn');
+  const raiseAmountInput = document.getElementById('raise-amount');
+  const discardBtn = document.getElementById('discard-btn');
 
-    let myId = null;
-    let players = [];
-    let phase = '';
-    let currentTurnId = null;
-    let myHand = [];
-    let selectedDiscardIndex = null;
+  const nameInput = document.getElementById('name-input');
+  const joinBtn = document.getElementById('join-btn');
 
-    joinBtn.onclick = () => {
-      const name = nameInput.value.trim();
-      if (!name) return alert('Please enter your name');
-      socket.emit('joinRoom', { name });
-      joinBtn.disabled = true;
-      nameInput.disabled = true;
-      gameContainer.style.display = 'block';
-      document.getElementById('join-container').style.display = 'none';
-    };
+  let myId = null;
+  let gameState = null;
+  let selectedDiscardIndices = [];
 
-    socket.on('connect', () => {
-      myId = socket.id;
+  function addMessage(text) {
+    const p = document.createElement('div');
+    p.textContent = text;
+    messageLog.appendChild(p);
+    messageLog.scrollTop = messageLog.scrollHeight;
+  }
+
+  joinBtn.onclick = () => {
+    const name = nameInput.value.trim();
+    if (!name) {
+      alert('Please enter your name');
+      return;
+    }
+    socket.emit('joinRoom', { name });
+    joinContainer.style.display = 'none';
+    gameContainer.style.display = 'block';
+  };
+
+  socket.on('connect', () => {
+    myId = socket.id;
+  });
+
+  socket.on('message', text => addMessage(text));
+  socket.on('errorMessage', text => alert(text));
+
+  socket.on('gameState', state => {
+    gameState = state;
+    renderGame();
+  });
+
+  function renderGame() {
+    renderSeats(gameState.players, myId, gameState);
+    renderCommunityCards(gameState.community);
+    renderPot(gameState.pot);
+    renderYourHand();
+    updateActionButtons();
+  }
+
+  function renderSeats(players, myId, state) {
+    pokerTable.innerHTML = '';
+    const centerX = 300;
+    const centerY = 300;
+    const radiusX = 230;
+    const radiusY = 180;
+
+    players.forEach((p, i) => {
+      const angle = (2 * Math.PI * i) / players.length - Math.PI / 2;
+      const x = centerX + radiusX * Math.cos(angle) - 70;
+      const y = centerY + radiusY * Math.sin(angle) - 40;
+
+      const seat = document.createElement('div');
+      seat.className = 'player-seat';
+      if (p.id === myId) seat.classList.add('you');
+      if (p.id === state.turnId) seat.classList.add('current-turn');
+      seat.style.left = `${x}px`;
+      seat.style.top = `${y}px`;
+
+      const currentBet = state.currentBets && state.currentBets[p.id] ? state.currentBets[p.id] : 0;
+
+      seat.innerHTML = `
+        <div class="player-name">${p.name}</div>
+        <div class="chip-stack">
+          Chips: ${p.chips}<br/>
+          ${currentBet > 0 ? `<small>Bet: ${currentBet}</small>` : ''}
+        </div>
+        <div>
+          ${p.isDealer ? '<span class="badge dealer">D</span>' : ''}
+          ${p.isSmallBlind ? '<span class="badge small-blind">SB</span>' : ''}
+          ${p.isBigBlind ? '<span class="badge big-blind">BB</span>' : ''}
+        </div>
+        <div class="hand-cards">${renderPlayerCards(p, myId)}</div>
+      `;
+
+      pokerTable.appendChild(seat);
     });
+  }
 
-    socket.on('errorMessage', msg => alert(msg));
-
-    socket.on('roomFull', () => alert('Room full. Try later.'));
-
-    socket.on('gameState', (state) => {
-      players = state.players;
-      phase = state.phase;
-      currentTurnId = state.turnId;
-      myHand = [];
-
-      // Find my hand
-      const me = players.find(p => p.id === myId);
-      if (me) myHand = me.hand;
-
-      renderSeats(players, myId, state);
-
-      communityCardsDiv.innerHTML = '';
-      for (const card of state.community) {
-        communityCardsDiv.appendChild(renderCard(card));
-      }
-
-      potDiv.textContent = `Pot: ${state.pot} chips`;
-
-      updateControls();
-    });
-
-    function renderSeats(players, myId, state) {
-      pokerTable.innerHTML = '';
-
-      // Circle layout
-      const cx = 300;
-      const cy = 300;
-      const radius = 230;
-      const n = players.length;
-
-      players.forEach((p, i) => {
-        const angle = (2 * Math.PI * i) / n - Math.PI / 2;
-        const x = cx + radius * Math.cos(angle) - 70;
-        const y = cy + radius * Math.sin(angle) - 40;
-
-        const seat = document.createElement('div');
-        seat.className = 'player-seat';
-        if (p.id === myId) seat.classList.add('you');
-        seat.style.left = `${x}px`;
-        seat.style.top = `${y}px`;
-
-        const isDealer = p.isDealer;
-        const isSmallBlind = p.isSmallBlind;
-        const isBigBlind = p.isBigBlind;
-
-        seat.innerHTML = `
-          <div class="player-name">${p.name}</div>
-          <div class="chip-stack">Chips: ${p.chips}</div>
-          <div>
-            ${isDealer ? '<span class="badge dealer">D</span>' : ''}
-            ${isSmallBlind ? '<span class="badge small-blind">SB</span>' : ''}
-            ${isBigBlind ? '<span class="badge big-blind">BB</span>' : ''}
-          </div>
-          <div class="hand-cards">${renderPlayerCards(p, myId)}</div>
-        `;
-
-        pokerTable.appendChild(seat);
-      });
+  function renderPlayerCards(player, myId) {
+    if (player.id === myId) {
+      // show cards face up
+      return player.hand.map((c, i) => {
+        const colorClass = (c.suit === '♥' || c.suit === '♦') ? 'red' : '';
+        return `<div class="card ${colorClass}">${c.rank}${c.suit}</div>`;
+      }).join('');
+    } else {
+      // show cards face down for others
+      return player.hand.map(_ => '<div class="card">🂠</div>').join('');
     }
+  }
 
-    function renderPlayerCards(player, myId) {
-      if (player.id !== myId) {
-        return player.hand.map(() => '<div class="card">🂠</div>').join('');
-      }
-      return player.hand
-        .map((card, idx) => {
-          const redSuits = ['♥', '♦'];
-          const isRed = redSuits.includes(card.suit);
-          const selectedClass = selectedDiscardIndex === idx ? 'selected' : '';
-          return `<div class="card ${isRed ? 'red' : ''} ${selectedClass}" data-idx="${idx}">${card.rank}${card.suit}</div>`;
-        })
-        .join('');
-    }
+  function renderCommunityCards(cards) {
+    communityCardsDiv.innerHTML = cards.map(c => {
+      const colorClass = (c.suit === '♥' || c.suit === '♦') ? 'red' : '';
+      return `<div class="card ${colorClass}">${c.rank}${c.suit}</div>`;
+    }).join('');
+  }
 
-    function renderCard(card) {
-      if (!card) return document.createElement('div');
-      const el = document.createElement('div');
-      el.className = 'card';
-      if (['♥', '♦'].includes(card.suit)) el.classList.add('red');
-      el.textContent = card.rank + card.suit;
-      return el;
-    }
+  function renderPot(pot) {
+    potDisplay.textContent = `Pot: ${pot}`;
+  }
 
-    pokerTable.onclick = (e) => {
-      if (!phase.endsWith('discard')) return;
-      if (e.target.classList.contains('card')) {
-        const idx = e.target.getAttribute('data-idx');
-        if (idx === null) return;
-        const i = parseInt(idx);
-        if (selectedDiscardIndex === i) {
-          selectedDiscardIndex = null;
-        } else {
-          selectedDiscardIndex = i;
+  function renderYourHand() {
+    if (!gameState) return;
+    const me = gameState.players.find(p => p.id === myId);
+    if (!me) return;
+    yourHandDiv.innerHTML = '';
+
+    me.hand.forEach((card, i) => {
+      const colorClass = (card.suit === '♥' || card.suit === '♦') ? 'red' : '';
+      const div = document.createElement('div');
+      div.className = 'card your-card ' + colorClass;
+      div.textContent = `${card.rank}${card.suit}`;
+      div.onclick = () => {
+        if (!discardBtn.disabled) {
+          if (selectedDiscardIndices.includes(i)) {
+            selectedDiscardIndices = selectedDiscardIndices.filter(x => x !== i);
+            div.classList.remove('selected');
+          } else {
+            selectedDiscardIndices.push(i);
+            div.classList.add('selected');
+          }
         }
-        updateControls();
-        renderSeats(players, myId, { community: [], pot: 0 });
-      }
-    };
+      };
+      yourHandDiv.appendChild(div);
+    });
+  }
 
-    function updateControls() {
-      const me = players.find(p => p.id === myId);
-      if (!me) {
-        controlsDiv.style.display = 'none';
-        return;
-      }
-
-      if (phase.endsWith('discard')) {
-        controlsDiv.style.display = 'block';
-        foldBtn.style.display = 'none';
-        checkBtn.style.display = 'none';
-        callBtn.style.display = 'none';
-        raiseBtn.style.display = 'none';
-        raiseInput.style.display = 'none';
-
-        discardBtn.style.display = 'inline-block';
-        discardBtn.disabled = selectedDiscardIndex === null;
-        return;
-      }
-
-      if (currentTurnId === myId && phase.includes('betting')) {
-        controlsDiv.style.display = 'flex';
-        foldBtn.style.display = 'inline-block';
-        checkBtn.style.display = 'inline-block';
-        callBtn.style.display = 'inline-block';
-        raiseBtn.style.display = 'inline-block';
-        raiseInput.style.display = 'inline-block';
-        discardBtn.style.display = 'none';
-        discardBtn.disabled = true;
-        return;
-      }
-
-      controlsDiv.style.display = 'none';
+  function updateActionButtons() {
+    if (!gameState) return;
+    const me = gameState.players.find(p => p.id === myId);
+    if (!me) {
+      foldBtn.disabled = true;
+      checkBtn.disabled = true;
+      callBtn.disabled = true;
+      raiseBtn.disabled = true;
+      discardBtn.disabled = true;
+      raiseAmountInput.disabled = true;
+      return;
     }
 
-    foldBtn.onclick = () => socket.emit('playerAction', { action: 'fold' });
-    checkBtn.onclick = () => socket.emit('playerAction', { action: 'check' });
-    callBtn.onclick = () => socket.emit('playerAction', { action: 'call' });
-    raiseBtn.onclick = () => {
-      const amt = parseInt(raiseInput.value);
-      if (!amt || amt <= 0) {
-        alert('Enter a valid raise amount');
-        return;
+    const phase = gameState.phase;
+    const isMyTurn = (gameState.turnId === myId);
+    const toCall = gameState.currentBets[gameState.turnId] || 0;
+    const currentBetToCall = Math.max(...Object.values(gameState.currentBets || {}), 0);
+
+    // Disable all by default
+    foldBtn.disabled = true;
+    checkBtn.disabled = true;
+    callBtn.disabled = true;
+    raiseBtn.disabled = true;
+    discardBtn.disabled = true;
+    raiseAmountInput.disabled = true;
+
+    if (phase.includes('discard')) {
+      // Discard phase, all players can discard anytime (no turn)
+      discardBtn.disabled = false;
+      // Betting buttons disabled
+      return;
+    }
+
+    if (phase.includes('betting') && isMyTurn && !me.folded) {
+      foldBtn.disabled = false;
+
+      const playerCurrentBet = gameState.currentBets[myId] || 0;
+      const maxBet = Math.max(...Object.values(gameState.currentBets || {}), 0);
+      const toCallAmount = maxBet - playerCurrentBet;
+
+      if (toCallAmount > 0) {
+        callBtn.disabled = false;
+      } else {
+        checkBtn.disabled = false;
       }
-      socket.emit('playerAction', { action: 'raise', amount: amt });
-      raiseInput.value = '';
-    };
 
-    discardBtn.onclick = () => {
-      if (selectedDiscardIndex === null) return alert('Select a card to discard');
-      socket.emit('playerAction', { action: 'discard', discardIndices: [selectedDiscardIndex] });
-      selectedDiscardIndex = null;
-      updateControls();
-    };
+      raiseBtn.disabled = false;
+      raiseAmountInput.disabled = false;
+    }
+  }
 
-    socket.on('showdown', () => {
-      alert('Showdown! Hand evaluation not implemented.');
-    });
-  </script>
+  foldBtn.onclick = () => {
+    socket.emit('playerAction', { action: 'fold' });
+  };
+  checkBtn.onclick = () => {
+    socket.emit('playerAction', { action: 'check' });
+  };
+  callBtn.onclick = () => {
+    socket.emit('playerAction', { action: 'call' });
+  };
+  raiseBtn.onclick = () => {
+    const amt = parseInt(raiseAmountInput.value, 10);
+    if (isNaN(amt) || amt <= 0) {
+      alert('Invalid raise amount');
+      return;
+    }
+    socket.emit('playerAction', { action: 'raise', amount: amt });
+  };
+  discardBtn.onclick = () => {
+    if (selectedDiscardIndices.length === 0) {
+      alert('Select cards to discard');
+      return;
+    }
+    socket.emit('playerAction', { action: 'discard', discardIndices: selectedDiscardIndices });
+    selectedDiscardIndices = [];
+  };
+</script>
+
 </body>
 </html>

@@ -1,6 +1,7 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
+const { Hand } = require('pokersolver');
 
 const app = express();
 const server = http.createServer(app);
@@ -10,13 +11,12 @@ app.use(express.static('public'));
 
 const PORT = process.env.PORT || 3000;
 
-const SUITS = ['♠', '♥', '♦', '♣'];
-const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
-
 function createDeck() {
+  const suits = ['♠', '♥', '♦', '♣'];
+  const ranks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
   const deck = [];
-  for (const s of SUITS) {
-    for (const r of RANKS) {
+  for (const s of suits) {
+    for (const r of ranks) {
       deck.push({ rank: r, suit: s });
     }
   }
@@ -24,374 +24,402 @@ function createDeck() {
 }
 
 function shuffle(deck) {
-  for (let i = deck.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+  for (let i = deck.length -1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i+1));
     [deck[i], deck[j]] = [deck[j], deck[i]];
   }
 }
 
-const PHASES = [
-  'pre-flop-betting',
-  'flop-deal',
-  'flop-discard',
-  'flop-betting',
-  'turn-deal',
-  'turn-discard',
-  'turn-betting',
-  'river-deal',
-  'river-discard',
-  'river-betting',
-  'showdown'
-];
+function formatCardForSolver(card) {
+  // 'As' for Ace of spades, 'Td' for Ten diamonds, etc.
+  let r = card.rank === '10' ? 'T' : card.rank[0];
+  let s = { '♠':'s', '♥':'h', '♦':'d', '♣':'c' }[card.suit];
+  return (r + s).toUpperCase();
+}
 
-const SMALL_BLIND = 1;
-const BIG_BLIND = 2;
-const STARTING_CHIPS = 200;
+function evaluateHands(players, community) {
+  const hands = players.map(p => {
+    const cards = p.hand.concat(community);
+    const formatted = cards.map(formatCardForSolver);
+    return { player: p, hand: Hand.solve(formatted) };
+  });
+  const winners = Hand.winners(hands.map(h => h.hand));
+  // Find which players have winning hands
+  const winnersPlayers = hands.filter(h => winners.includes(h.hand)).map(h => h.player.id);
+  return { hands, winnersPlayers };
+}
 
-const ROOM_ID = 'iowa-room';
+// Game state
+let room = {
+  players: [], // { id, name, chips, hand, folded, isDealer, isSmallBlind, isBigBlind, currentBet }
+  deck: [],
+  community: [],
+  pot: 0,
+  currentBets: {}, // playerId -> current bet this round
+  phase: 'waiting', // waiting, preflop-betting, flop-discard, flop-betting, turn-discard, turn-betting, river-discard, river-betting, showdown
+  turnIndex: 0, // index in players array
+  dealerIndex: 0,
+  smallBlind: 1,
+  bigBlind: 2,
+  minRaise: 2,
+  currentBetToCall: 0,
+};
 
-const rooms = {};
+function resetForNewHand() {
+  room.deck = createDeck();
+  shuffle(room.deck);
+  room.community = [];
+  room.pot = 0;
+  room.currentBets = {};
+  room.phase = 'preflop-betting';
+  room.turnIndex = (room.dealerIndex + 1) % room.players.length; // small blind acts after dealer
+  room.currentBetToCall = room.bigBlind;
+  room.minRaise = room.bigBlind;
 
-io.on('connection', (socket) => {
-  console.log(`Player connected: ${socket.id}`);
+  // Reset player states and deal 5 cards
+  for (const p of room.players) {
+    p.folded = false;
+    p.hand = [];
+    p.currentBet = 0;
+  }
+
+  // Deal 5 cards to each player
+  for (let i=0; i < 5; i++) {
+    for (const p of room.players) {
+      p.hand.push(room.deck.pop());
+    }
+  }
+
+  // Assign blinds
+  const sbIndex = (room.dealerIndex + 1) % room.players.length;
+  const bbIndex = (room.dealerIndex + 2) % room.players.length;
+
+  room.players.forEach((p,i) => {
+    p.isDealer = (i === room.dealerIndex);
+    p.isSmallBlind = (i === sbIndex);
+    p.isBigBlind = (i === bbIndex);
+    p.currentBet = 0;
+  });
+
+  // Post blinds from chips and update current bets
+  const sbPlayer = room.players[sbIndex];
+  const bbPlayer = room.players[bbIndex];
+
+  sbPlayer.chips -= room.smallBlind;
+  sbPlayer.currentBet = room.smallBlind;
+
+  bbPlayer.chips -= room.bigBlind;
+  bbPlayer.currentBet = room.bigBlind;
+
+  room.currentBets[sbPlayer.id] = room.smallBlind;
+  room.currentBets[bbPlayer.id] = room.bigBlind;
+
+  room.pot = room.smallBlind + room.bigBlind;
+}
+
+function nextActivePlayer(startIndex) {
+  const n = room.players.length;
+  let i = startIndex;
+  for (let count=0; count < n; count++) {
+    i = (i + 1) % n;
+    if (!room.players[i].folded && room.players[i].chips > 0) {
+      return i;
+    }
+  }
+  return -1; // no active players found
+}
+
+function allPlayersCalledOrFolded() {
+  // Betting round ends when all active players have matched currentBetToCall or folded
+  return room.players.every(p => 
+    p.folded || p.currentBet === room.currentBetToCall || p.chips === 0
+  );
+}
+
+function proceedToNextPhase() {
+  // Reset bets for next betting round and add currentBets to pot
+  const roundBetsSum = Object.values(room.currentBets).reduce((a,b) => a+b,0);
+  room.pot += roundBetsSum;
+  room.currentBets = {};
+  room.players.forEach(p => p.currentBet = 0);
+
+  if (room.phase === 'preflop-betting') {
+    room.phase = 'flop-discard';
+    room.community.push(room.deck.pop(), room.deck.pop(), room.deck.pop());
+  } else if (room.phase === 'flop-discard') {
+    room.phase = 'flop-betting';
+  } else if (room.phase === 'flop-betting') {
+    room.phase = 'turn-discard';
+    room.community.push(room.deck.pop());
+  } else if (room.phase === 'turn-discard') {
+    room.phase = 'turn-betting';
+  } else if (room.phase === 'turn-betting') {
+    room.phase = 'river-discard';
+    room.community.push(room.deck.pop());
+  } else if (room.phase === 'river-discard') {
+    room.phase = 'river-betting';
+  } else if (room.phase === 'river-betting') {
+    room.phase = 'showdown';
+    handleShowdown();
+    return;
+  }
+  room.turnIndex = (room.dealerIndex + 1) % room.players.length; // turn starts after dealer again
+  room.currentBetToCall = 0;
+  room.minRaise = room.bigBlind;
+  emitGameState();
+}
+
+function handleShowdown() {
+  const activePlayers = room.players.filter(p => !p.folded);
+  if (activePlayers.length === 1) {
+    // Only one player left, he wins pot
+    const winner = activePlayers[0];
+    winner.chips += room.pot;
+    io.emit('message', `${winner.name} wins the pot of ${room.pot} chips!`);
+    room.pot = 0;
+    startNewHand();
+    return;
+  }
+  // Evaluate hands with pokersolver
+  const { hands, winnersPlayers } = evaluateHands(activePlayers, room.community);
+
+  let winnersNames = winnersPlayers.map(id => {
+    const p = room.players.find(pl => pl.id === id);
+    return p ? p.name : 'Unknown';
+  });
+
+  io.emit('message', `Showdown! Winner(s): ${winnersNames.join(', ')}`);
+
+  // Split pot evenly
+  const share = Math.floor(room.pot / winnersPlayers.length);
+  winnersPlayers.forEach(id => {
+    const p = room.players.find(pl => pl.id === id);
+    if (p) p.chips += share;
+  });
+  room.pot = 0;
+
+  startNewHand();
+}
+
+function startNewHand() {
+  // Move dealer to next player who has chips
+  let nextDealer = room.dealerIndex;
+  for (let i = 1; i <= room.players.length; i++) {
+    const idx = (room.dealerIndex + i) % room.players.length;
+    if (room.players[idx].chips > 0) {
+      nextDealer = idx;
+      break;
+    }
+  }
+  room.dealerIndex = nextDealer;
+
+  // Remove players with zero chips from game
+  room.players = room.players.filter(p => p.chips > 0);
+
+  if (room.players.length < 2) {
+    io.emit('message', 'Game over! Not enough players with chips.');
+    room.phase = 'waiting';
+    emitGameState();
+    return;
+  }
+
+  resetForNewHand();
+  emitGameState();
+}
+
+function emitGameState() {
+  io.emit('gameState', {
+    players: room.players.map(p => ({
+      id: p.id,
+      name: p.name,
+      chips: p.chips,
+      hand: p.hand,
+      folded: p.folded,
+      isDealer: p.isDealer,
+      isSmallBlind: p.isSmallBlind,
+      isBigBlind: p.isBigBlind,
+      currentBet: p.currentBet,
+    })),
+    community: room.community,
+    pot: room.pot,
+    currentBets: room.currentBets,
+    phase: room.phase,
+    turnId: room.players[room.turnIndex]?.id || null,
+  });
+}
+
+// --- SOCKET.IO ---
+io.on('connection', socket => {
+  console.log('User connected', socket.id);
 
   socket.on('joinRoom', ({ name }) => {
-    let room = rooms[ROOM_ID];
-    if (!room) {
-      room = {
-        players: [],
-        deck: [],
-        community: [],
-        pot: 0,
-        phase: null,
-        turnIndex: 0,
-        currentBet: 0,
-        bets: {},
-        discards: {},
-        dealerIndex: -1,
-        startingTurnIndex: 0,
-      };
-      rooms[ROOM_ID] = room;
-    }
-    if (room.players.length >= 5) {
+    if (room.players.find(p => p.id === socket.id)) return; // already joined
+    if (room.players.length >= 6) {
       socket.emit('roomFull');
       return;
     }
-    if (room.players.find(p => p.id === socket.id)) return;
-
     room.players.push({
       id: socket.id,
-      name: name || 'Anon',
+      name,
+      chips: 200,
       hand: [],
-      chips: STARTING_CHIPS,
       folded: false,
-      discardedThisRound: false,
+      isDealer: false,
+      isSmallBlind: false,
+      isBigBlind: false,
+      currentBet: 0,
     });
-    socket.join(ROOM_ID);
 
-    io.to(socket.id).emit('status', `Welcome, ${name}! Waiting for players...`);
-    emitGameState();
-
-    if (room.players.length >= 2 && !room.phase) {
-      startHand();
+    if (room.phase === 'waiting' && room.players.length >= 2) {
+      resetForNewHand();
     }
+
+    emitGameState();
   });
 
   socket.on('playerAction', ({ action, amount, discardIndices }) => {
-    const room = rooms[ROOM_ID];
-    if (!room) return;
     const playerIndex = room.players.findIndex(p => p.id === socket.id);
     if (playerIndex === -1) return;
+
     const player = room.players[playerIndex];
+    if (player.folded) return;
 
-    if (room.phase.endsWith('discard')) {
-      // DISCARD PHASE - simultaneous discards, no turn check
-      if (action !== 'discard') {
-        socket.emit('errorMessage', 'You must discard a card now.');
-        return;
-      }
-      if (player.folded) {
-        socket.emit('errorMessage', 'You are folded.');
-        return;
-      }
-      if (player.discardedThisRound) {
-        socket.emit('errorMessage', 'You already discarded this round.');
-        return;
-      }
-      if (!discardIndices || discardIndices.length !== 1) {
-        socket.emit('errorMessage', 'Must discard exactly one card.');
-        return;
-      }
-      discardIndices.sort((a, b) => b - a).forEach(i => {
-        if (i >= 0 && i < player.hand.length) player.hand.splice(i, 1);
-      });
-      player.discardedThisRound = true;
-      io.to(socket.id).emit('status', 'Discard done. Waiting for others...');
-      emitGameState();
+    // Is it player's turn? Only enforce during betting phases (not discards)
+    if (room.phase.includes('betting') && room.turnIndex !== playerIndex) return;
 
-      // Check if all non-folded players discarded
-      const allDiscarded = room.players.filter(p => !p.folded).every(p => p.discardedThisRound);
-      if (allDiscarded) {
-        // Reset discard flags for next discard phase
-        for (const p of room.players) p.discardedThisRound = false;
-        advancePhase();
+    if (action === 'fold') {
+      player.folded = true;
+      player.currentBet = 0;
+      room.currentBets[player.id] = 0;
+      // Check if only one player left
+      const activePlayers = room.players.filter(p => !p.folded);
+      if (activePlayers.length === 1) {
+        const winner = activePlayers[0];
+        winner.chips += room.pot + Object.values(room.currentBets).reduce((a,b)=>a+b,0);
+        room.pot = 0;
+        io.emit('message', `${winner.name} wins by fold!`);
+        startNewHand();
+        return;
+      }
+      room.turnIndex = nextActivePlayer(room.turnIndex);
+      if (allPlayersCalledOrFolded()) proceedToNextPhase();
+      else emitGameState();
+      return;
+    }
+
+    if (action === 'check') {
+      // Can only check if currentBetToCall equals player's currentBet
+      if (player.currentBet === room.currentBetToCall) {
+        room.turnIndex = nextActivePlayer(room.turnIndex);
+        if (allPlayersCalledOrFolded()) proceedToNextPhase();
+        else emitGameState();
       }
       return;
     }
 
-    // BETTING PHASES - turn based
-    if (room.players[room.turnIndex].id !== socket.id) {
-      socket.emit('errorMessage', 'Not your turn.');
-      return;
-    }
-    if (player.folded) {
-      socket.emit('errorMessage', 'You are folded.');
-      return;
-    }
-
-    switch (action) {
-      case 'fold':
-        player.folded = true;
-        room.bets[player.id] = room.bets[player.id] || 0;
-        room.pot += room.bets[player.id];
-        room.bets[player.id] = 0;
-        nextTurn();
-        break;
-
-      case 'check':
-        if ((room.bets[player.id] || 0) < room.currentBet) {
-          socket.emit('errorMessage', 'Cannot check, you must call or raise.');
-          return;
-        }
-        nextTurn();
-        break;
-
-      case 'call': {
-        const toCall = room.currentBet - (room.bets[player.id] || 0);
-        if (player.chips < toCall) {
-          socket.emit('errorMessage', 'Not enough chips to call.');
-          return;
-        }
+    if (action === 'call') {
+      const toCall = room.currentBetToCall - player.currentBet;
+      if (toCall > player.chips) {
+        // All-in call
+        player.currentBet += player.chips;
+        room.currentBets[player.id] = (room.currentBets[player.id] || 0) + player.chips;
+        player.chips = 0;
+      } else {
         player.chips -= toCall;
-        room.pot += toCall;
-        room.bets[player.id] = room.currentBet;
-        nextTurn();
-        break;
+        player.currentBet += toCall;
+        room.currentBets[player.id] = (room.currentBets[player.id] || 0) + toCall;
       }
-
-      case 'raise': {
-        if (!amount || amount <= room.currentBet) {
-          socket.emit('errorMessage', 'Raise must be higher than current bet.');
-          return;
-        }
-        const toPut = amount - (room.bets[player.id] || 0);
-        if (player.chips < toPut) {
-          socket.emit('errorMessage', 'Not enough chips to raise.');
-          return;
-        }
-        player.chips -= toPut;
-        room.pot += toPut;
-        room.currentBet = amount;
-        room.bets[player.id] = amount;
-        nextTurn();
-        break;
-      }
-
-      default:
-        socket.emit('errorMessage', 'Unknown action.');
+      room.turnIndex = nextActivePlayer(room.turnIndex);
+      if (allPlayersCalledOrFolded()) proceedToNextPhase();
+      else emitGameState();
+      return;
     }
-    emitGameState();
+
+    if (action === 'raise') {
+      const minRaise = room.minRaise;
+      if (amount < minRaise) {
+        socket.emit('errorMessage', `Minimum raise is ${minRaise}`);
+        return;
+      }
+      const toCall = room.currentBetToCall - player.currentBet;
+      const totalBet = toCall + amount;
+      if (totalBet > player.chips) {
+        socket.emit('errorMessage', 'Not enough chips to raise');
+        return;
+      }
+      player.chips -= totalBet;
+      player.currentBet += totalBet;
+      room.currentBets[player.id] = (room.currentBets[player.id] || 0) + totalBet;
+
+      room.currentBetToCall = player.currentBet;
+      room.minRaise = amount;
+      room.turnIndex = nextActivePlayer(room.turnIndex);
+      emitGameState();
+      return;
+    }
+
+    if (action === 'discard') {
+      // Only allowed during discard phases
+      if (!room.phase.includes('discard')) {
+        socket.emit('errorMessage', 'Not discard phase');
+        return;
+      }
+      if (!discardIndices || discardIndices.length === 0) {
+        socket.emit('errorMessage', 'No card selected to discard');
+        return;
+      }
+
+      // Remove cards from player's hand (by indices)
+      discardIndices.sort((a,b) => b - a); // remove from highest index to lowest to avoid reindex issues
+      for (const idx of discardIndices) {
+        if (idx >= 0 && idx < player.hand.length) {
+          player.hand.splice(idx, 1);
+        }
+      }
+
+      // Draw new cards to replace discarded cards
+      for (let i=0; i < discardIndices.length; i++) {
+        player.hand.push(room.deck.pop());
+      }
+
+      // Mark player as done discarding
+      player.hasDiscarded = true;
+
+      // Check if all players have discarded this round
+      const allDone = room.players.every(p => p.folded || (p.hasDiscarded || !room.phase.includes('discard')));
+
+      if (allDone) {
+        // Reset discard flags
+        room.players.forEach(p => p.hasDiscarded = false);
+
+        // Move to next phase betting
+        if (room.phase === 'flop-discard') room.phase = 'flop-betting';
+        else if (room.phase === 'turn-discard') room.phase = 'turn-betting';
+        else if (room.phase === 'river-discard') room.phase = 'river-betting';
+
+        // Reset turn index to after dealer
+        room.turnIndex = (room.dealerIndex + 1) % room.players.length;
+        room.currentBetToCall = 0;
+        room.minRaise = room.bigBlind;
+
+        emitGameState();
+        return;
+      }
+      emitGameState();
+      return;
+    }
   });
 
   socket.on('disconnect', () => {
-    console.log(`Player disconnected: ${socket.id}`);
-    const room = rooms[ROOM_ID];
-    if (!room) return;
-    const idx = room.players.findIndex(p => p.id === socket.id);
-    if (idx !== -1) {
-      room.players.splice(idx, 1);
-      delete room.bets[socket.id];
-      if (room.players.length === 0) {
-        delete rooms[ROOM_ID];
-      } else {
-        if (room.turnIndex >= room.players.length) room.turnIndex = 0;
-        emitGameState();
-      }
+    console.log('User disconnected', socket.id);
+    room.players = room.players.filter(p => p.id !== socket.id);
+    if (room.players.length < 2) {
+      room.phase = 'waiting';
     }
-  });
-
-  function startHand() {
-    const room = rooms[ROOM_ID];
-    room.phase = null;
-    room.deck = createDeck();
-    shuffle(room.deck);
-    room.community = [];
-    room.pot = 0;
-    room.bets = {};
-    room.currentBet = 0;
-
-    room.dealerIndex = (room.dealerIndex + 1) % room.players.length;
-
-    for (const p of room.players) {
-      p.folded = false;
-      p.hand = room.deck.splice(0, 5);
-      p.discardedThisRound = false;
-    }
-
-    // Post blinds
-    const smallBlindIndex = (room.dealerIndex + 1) % room.players.length;
-    const bigBlindIndex = (room.dealerIndex + 2) % room.players.length;
-
-    const smallBlindPlayer = room.players[smallBlindIndex];
-    const bigBlindPlayer = room.players[bigBlindIndex];
-
-    smallBlindPlayer.chips -= SMALL_BLIND;
-    bigBlindPlayer.chips -= BIG_BLIND;
-
-    room.pot = SMALL_BLIND + BIG_BLIND;
-
-    room.bets[smallBlindPlayer.id] = SMALL_BLIND;
-    room.bets[bigBlindPlayer.id] = BIG_BLIND;
-
-    room.currentBet = BIG_BLIND;
-    room.turnIndex = (bigBlindIndex + 1) % room.players.length;
-    room.startingTurnIndex = room.turnIndex;
-
-    room.phase = 'pre-flop-betting';
-
     emitGameState();
-    promptPlayerAction();
-  }
-
-  function advancePhase() {
-    const room = rooms[ROOM_ID];
-    const idx = PHASES.indexOf(room.phase);
-    const nextIdx = idx + 1;
-
-    if (nextIdx >= PHASES.length) {
-      room.phase = 'showdown';
-      io.to(ROOM_ID).emit('showdown', room);
-      emitGameState();
-      return;
-    }
-
-    room.phase = PHASES[nextIdx];
-
-    switch (room.phase) {
-      case 'flop-deal':
-        room.community.push(...room.deck.splice(0, 3));
-        emitGameState();
-        advancePhase(); // Immediately move to flop-discard without waiting
-        break;
-
-      case 'flop-discard':
-      case 'turn-discard':
-      case 'river-discard':
-        // Reset discard flags
-        for (const p of room.players) p.discardedThisRound = false;
-        io.to(ROOM_ID).emit('status', 'Discard a card.');
-        emitGameState();
-        break;
-
-      case 'flop-betting':
-      case 'turn-betting':
-      case 'river-betting':
-        room.currentBet = 0;
-        room.bets = {};
-        room.startingTurnIndex = room.turnIndex;
-        emitGameState();
-        promptPlayerAction();
-        break;
-
-      case 'turn-deal':
-        room.community.push(room.deck.shift());
-        emitGameState();
-        advancePhase(); // Immediately to turn-discard
-        break;
-
-      case 'river-deal':
-        room.community.push(room.deck.shift());
-        emitGameState();
-        advancePhase(); // Immediately to river-discard
-        break;
-
-      case 'showdown':
-        io.to(ROOM_ID).emit('showdown', room);
-        emitGameState();
-        break;
-    }
-  }
-
-  function promptPlayerAction() {
-    const room = rooms[ROOM_ID];
-    const player = room.players[room.turnIndex];
-    io.to(ROOM_ID).emit('status', `Player ${player.name}, it's your turn.`);
-    io.to(player.id).emit('yourTurn', { phase: room.phase, currentBet: room.currentBet });
-  }
-
-  function nextTurn() {
-    const room = rooms[ROOM_ID];
-    let nextIndex = room.turnIndex;
-    let attempts = 0;
-    do {
-      nextIndex = (nextIndex + 1) % room.players.length;
-      attempts++;
-      if (attempts > room.players.length) break;
-    } while (room.players[nextIndex].folded);
-
-    room.turnIndex = nextIndex;
-
-    const activePlayers = room.players.filter(p => !p.folded);
-    if (activePlayers.length <= 1) {
-      io.to(activePlayers[0].id).emit('status', 'You win! Others folded.');
-      setTimeout(startHand, 5000);
-      return;
-    }
-
-    const bets = activePlayers.map(p => room.bets[p.id] || 0);
-    const maxBet = Math.max(...bets);
-    const allEqual = bets.every(b => b === maxBet);
-
-    if (
-      allEqual &&
-      maxBet === room.currentBet &&
-      room.turnIndex === room.startingTurnIndex
-    ) {
-      advancePhase();
-    } else {
-      promptPlayerAction();
-    }
-  }
-
-  function emitGameState() {
-    const room = rooms[ROOM_ID];
-    for (const p of room.players) {
-      io.to(p.id).emit('gameState', {
-        players: room.players.map(pl => ({
-          id: pl.id,
-          name: pl.name,
-          chips: pl.chips,
-          folded: pl.folded,
-          hand: pl.id === p.id ? pl.hand : Array(pl.hand.length).fill(null),
-          bet: room.bets[pl.id] || 0,
-          isDealer: room.dealerIndex === room.players.indexOf(pl),
-          isSmallBlind:
-            room.dealerIndex !== -1 &&
-            room.players.indexOf(pl) === (room.dealerIndex + 1) % room.players.length,
-          isBigBlind:
-            room.dealerIndex !== -1 &&
-            room.players.indexOf(pl) === (room.dealerIndex + 2) % room.players.length,
-        })),
-        community: room.community,
-        pot: room.pot,
-        phase: room.phase,
-        turnId: room.players[room.turnIndex]?.id,
-        currentBet: room.currentBet,
-      });
-    }
-  }
+  });
 });
 
 server.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
