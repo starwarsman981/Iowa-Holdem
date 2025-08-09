@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Iowa Hold’em - Multiplayer</title>
+<style>
+  body { font-family: Arial, sans-serif; max-width: 700px; margin: 2rem auto; }
+  .card { display: inline-block; padding: 0.5rem; margin: 0.2rem; border: 1px solid #444; border-radius: 4px; font-weight: bold; font-size: 1.3rem; width: 36px; text-align: center; cursor: pointer; }
+  .board-card { background: #eee; }
+  #holeCards .card.selected { background: #8f8; }
+  #chat { border: 1px solid #ccc; height: 100px; overflow-y: scroll; margin-top: 1rem; padding: 0.5rem; }
+  #playersList { margin-top: 1rem; }
+  #status { margin-top: 1rem; font-weight: bold; }
+  button { margin-top: 0.5rem; }
+</style>
+</head>
+<body>
+
+<h1>Iowa Hold’em (Multiplayer)</h1>
+
+<div id="joinDiv">
+  <label>Your name: <input id="nameInput" /></label>
+  <label>Room ID: <input id="roomInput" /></label>
+  <button id="joinBtn">Join Room</button>
+</div>
+
+<div id="gameDiv" style="display:none;">
+  <div><strong>Players:</strong> <span id="playersList"></span></div>
+  <div><strong>Board:</strong> <span id="board"></span></div>
+  <div><strong>Your Hole Cards:</strong> <span id="holeCards"></span></div>
+  <div id="status"></div>
+  <button id="discardBtn" disabled>Discard Selected Card</button>
+  <div id="chat"></div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const socket = io();
+
+  const joinDiv = document.getElementById('joinDiv');
+  const gameDiv = document.getElementById('gameDiv');
+  const nameInput = document.getElementById('nameInput');
+  const roomInput = document.getElementById('roomInput');
+  const joinBtn = document.getElementById('joinBtn');
+
+  const playersList = document.getElementById('playersList');
+  const boardSpan = document.getElementById('board');
+  const holeCardsSpan = document.getElementById('holeCards');
+  const statusDiv = document.getElementById('status');
+  const discardBtn = document.getElementById('discardBtn');
+  const chatDiv = document.getElementById('chat');
+
+  let myId = null;
+  let myHoleCards = [];
+  let mySelectedCard = null;
+  let currentTurnId = null;
+  let currentStage = null;
+
+  function renderCards(container, cards, clickable=false) {
+    container.innerHTML = '';
+    cards.forEach(card => {
+      const c = document.createElement('span');
+      c.className = 'card';
+      c.textContent = card;
+      if(clickable){
+        c.style.cursor = 'pointer';
+        c.onclick = () => {
+          if(mySelectedCard === card) {
+            c.classList.remove('selected');
+            mySelectedCard = null;
+          } else {
+            [...container.children].forEach(x => x.classList.remove('selected'));
+            c.classList.add('selected');
+            mySelectedCard = card;
+          }
+          discardBtn.disabled = mySelectedCard === null || currentTurnId !== myId;
+        };
+      }
+      container.appendChild(c);
+    });
+  }
+
+  joinBtn.onclick = () => {
+    const name = nameInput.value.trim();
+    const roomId = roomInput.value.trim();
+    if (!name || !roomId) {
+      alert("Enter both name and room ID");
+      return;
+    }
+    myId = null;
+    socket.emit('joinRoom', { name, roomId });
+  };
+
+  socket.on('playersUpdate', (players) => {
+    playersList.textContent = players.map(p => p.name).join(', ');
+  });
+
+  socket.on('gameStarted', ({ board, stage }) => {
+    joinDiv.style.display = 'none';
+    gameDiv.style.display = 'block';
+    currentStage = stage;
+    statusDiv.textContent = `Stage: ${stage} — Waiting for discards`;
+    boardSpan.textContent = board.join(' ');
+    mySelectedCard = null;
+    discardBtn.disabled = true;
+    myHoleCards = [];
+  });
+
+  socket.on('turn', (playerId) => {
+    currentTurnId = playerId;
+    if (playerId === myId) {
+      statusDiv.textContent = `Your turn to discard a card (${currentStage}). Select one and click discard.`;
+      discardBtn.disabled = true;
+      renderCards(holeCardsSpan, myHoleCards, true);
+    } else {
+      statusDiv.textContent = `Waiting for ${playerId}'s discard...`;
+      discardBtn.disabled = true;
+      renderCards(holeCardsSpan, myHoleCards, false);
+    }
+  });
+
+  socket.on('stageChanged', (stage) => {
+    currentStage = stage;
+    statusDiv.textContent = `Stage changed to ${stage}`;
+    if(stage !== 'showdown'){
+      mySelectedCard = null;
+      discardBtn.disabled = currentTurnId !== myId;
+      renderCards(holeCardsSpan, myHoleCards, currentTurnId === myId);
+    }
+  });
+
+  socket.on('showdown', ({ showdownHands, board }) => {
+    statusDiv.textContent = 'Showdown! Hands revealed below.';
+    boardSpan.textContent = board.join(' ');
+    let msg = '<br>Showdown Hands:<br>';
+    showdownHands.forEach(h => {
+      const you = h.id === myId ? "(You)" : "";
+      msg += `${h.name} ${you}: Hole cards: ${h.holeCards.join(' ')} | Discards: ${h.discards.join(' ')}<br>`;
+    });
+    chatDiv.innerHTML = msg;
+    discardBtn.disabled = true;
+  });
+
+  socket.on('roomFull', () => {
+    alert('Room full. Max 6 players.');
+  });
+
+  // When you join, server sends you your socket ID
+  socket.on('connect', () => {
+    myId = socket.id;
+  });
+
+  // You receive your hole cards privately (simulate with a message from server)
+  socket.on('gameStarted', (data) => {
+    // After game starts, server sent board and stage, now ask server your hole cards privately
+    socket.emit('requestHoleCards');
+  });
+
+  socket.on('holeCards', (cards) => {
+    myHoleCards = cards;
+    renderCards(holeCardsSpan, myHoleCards, currentTurnId === myId);
+  });
+
+  discardBtn.onclick = () => {
+    if (mySelectedCard && currentTurnId === myId) {
+      socket.emit('discardCard', { card: mySelectedCard, roomId: roomInput.value.trim() });
+      mySelectedCard = null;
+      discardBtn.disabled = true;
+    }
+  };
+
+  // Server sends hole cards only to the right player
+  socket.on('yourHoleCards', (cards) => {
+    myHoleCards = cards;
+    renderCards(holeCardsSpan, myHoleCards, currentTurnId === myId);
+  });
+</script>
+
+</body>
+</html>
