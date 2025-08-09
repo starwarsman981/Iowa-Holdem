@@ -1,88 +1,57 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<title>Iowa Hold'em</title>
-<style>
-  body { font-family: monospace; background: #222; color: #eee; max-width: 700px; margin: 0 auto; padding: 10px; }
-  h1 { text-align: center; }
-  #game { margin-top: 20px; }
-  input, button { font-size: 1rem; padding: 5px; margin: 5px 2px; }
-  #status, #pot, #phase { margin: 10px 0; }
-  #community, #players { margin: 10px 0; }
-  .card {
-    display: inline-block;
-    border: 1px solid #eee;
-    border-radius: 4px;
-    width: 40px;
-    height: 60px;
-    line-height: 60px;
-    text-align: center;
-    font-weight: bold;
-    margin: 2px;
-    user-select: none;
-    cursor: default;
-    background-color: white;
-    color: black;
-    user-select: none;
-  }
-  .card.red { color: red; }
-  .card.back {
-    background: repeating-linear-gradient(
-      45deg,
-      #555,
-      #555 5px,
-      #666 5px,
-      #666 10px
-    );
-    border: 1px solid #333;
-    color: transparent;
-    cursor: default;
-  }
-  .card.selected { background-color: crimson; color: white; cursor: pointer; }
-  .player {
-    border: 1px solid #444;
-    padding: 5px;
-    margin: 5px 0;
-    border-radius: 4px;
-  }
-  .dealer { font-weight: bold; color: #0f0; }
-  .small-blind { font-weight: bold; color: #0af; }
-  .big-blind { font-weight: bold; color: #a0f; }
-  .folded { opacity: 0.5; text-decoration: line-through; }
-  #actions button:disabled { opacity: 0.5; cursor: not-allowed; }
-  #actions { margin-top: 15px; }
-</style>
+  <meta charset="UTF-8" />
+  <title>Iowa Hold'em</title>
+  <style>
+    body { font-family: monospace; background: #121212; color: #eee; margin: 0; padding: 10px; }
+    #players { display: flex; flex-wrap: wrap; gap: 10px; }
+    .player { border: 1px solid #555; padding: 5px; width: 200px; background: #222; position: relative; }
+    .player.folded { opacity: 0.5; }
+    .player.you { border-color: yellow; }
+    .cards { display: flex; gap: 4px; margin-top: 5px; }
+    .card {
+      width: 30px; height: 40px; border: 1px solid #888; border-radius: 4px;
+      display: flex; justify-content: center; align-items: center; cursor: default;
+      user-select: none; background: #333;
+    }
+    .card.red { color: red; }
+    .card.selected { border-color: yellow; background: #444; cursor: pointer; }
+    #community { margin: 10px 0; }
+    #community .card { width: 40px; height: 60px; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    #actions { margin-top: 10px; }
+  </style>
 </head>
 <body>
-  <h1>Iowa Hold'em</h1>
-  <div id="game">
-    <input id="nameInput" placeholder="Enter your name and press Enter" autocomplete="off" />
-    <div id="status"></div>
-    <div id="pot"></div>
-    <div id="phase"></div>
-    <div id="community"></div>
-    <div id="players"></div>
-    <div id="actions" style="margin-top:10px;">
-      <button id="foldBtn">Fold</button>
-      <button id="checkBtn">Check</button>
-      <button id="callBtn">Call</button>
-      <input id="raiseAmount" type="number" min="1" placeholder="Raise amount" style="width:80px;" />
-      <button id="raiseBtn">Raise</button>
-      <button id="discardBtn" disabled>Discard Selected Card</button>
-    </div>
+  <h2>Iowa Hold'em</h2>
+  <div>
+    <label>Name: <input type="text" id="nameInput" /></label>
+    <button id="joinBtn">Join Game</button>
+  </div>
+  <div id="status" style="margin-top:10px;"></div>
+  <div id="pot" style="margin-top:5px;"></div>
+  <div id="phase" style="margin-top:5px;"></div>
+
+  <div id="community"></div>
+  <div id="players"></div>
+
+  <div id="actions" style="margin-top:10px; display:none;">
+    <button id="foldBtn">Fold</button>
+    <button id="checkBtn">Check</button>
+    <button id="callBtn">Call</button>
+    <input type="number" id="raiseAmount" min="1" style="width:60px;" />
+    <button id="raiseBtn">Raise</button>
+    <button id="discardBtn" disabled>Discard Selected Card</button>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script>
     const socket = io();
-    let myId = null;
-    let currentTurnId = null;
-    let phase = null;
-    let selectedDiscardIndices = [];
-    const ROOM_NAME = 'iowa-room';
+    const ROOM = 'iowa-room';
 
     const nameInput = document.getElementById('nameInput');
+    const joinBtn = document.getElementById('joinBtn');
     const statusDiv = document.getElementById('status');
     const potDiv = document.getElementById('pot');
     const phaseDiv = document.getElementById('phase');
@@ -92,29 +61,25 @@
     const foldBtn = document.getElementById('foldBtn');
     const checkBtn = document.getElementById('checkBtn');
     const callBtn = document.getElementById('callBtn');
-    const raiseAmountInput = document.getElementById('raiseAmount');
     const raiseBtn = document.getElementById('raiseBtn');
+    const raiseAmountInput = document.getElementById('raiseAmount');
     const discardBtn = document.getElementById('discardBtn');
 
-    let playerName = null;
+    let myId = null;
+    let phase = null;
+    let currentTurnId = null;
+    let selectedDiscardIndex = null;
 
-    nameInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        const val = nameInput.value.trim();
-        if (!val) {
-          alert('Please enter a name');
-          return;
-        }
-        playerName = val;
-        socket.emit('joinRoom', { roomId: ROOM_NAME, name: playerName });
-        statusDiv.textContent = `Joining room as ${playerName}...`;
-        nameInput.disabled = true;
-      }
-    });
+    joinBtn.onclick = () => {
+      const name = nameInput.value.trim();
+      if (!name) return alert('Enter a name');
+      socket.emit('joinRoom', { name });
+      joinBtn.disabled = true;
+      nameInput.disabled = true;
+    };
 
     socket.on('connect', () => {
       myId = socket.id;
-      console.log('Connected with id:', myId);
     });
 
     socket.on('status', msg => {
@@ -148,115 +113,7 @@
         const pDiv = document.createElement('div');
         pDiv.className = 'player';
         if (p.folded) pDiv.classList.add('folded');
-        if (p.id === myId) pDiv.style.borderColor = 'yellow';
+        if (p.id === myId) pDiv.classList.add('you');
 
         let title = `${p.name} - Chips: ${p.chips} - Bet: ${p.bet}`;
-        if (p.isDealer) title += ' (Dealer)';
-        if (p.isSmallBlind) title += ' (Small Blind)';
-        if (p.isBigBlind) title += ' (Big Blind)';
-        pDiv.title = title;
-
-        // Cards
-        const cardsDiv = document.createElement('div');
-        for (let i = 0; i < p.hand.length; i++) {
-          const c = p.hand[i];
-          let cardEl;
-          if (c) {
-            cardEl = renderCard(c);
-            if (p.id === myId && phase && phase.endsWith('discard')) {
-              cardEl.style.cursor = 'pointer';
-              cardEl.onclick = () => {
-                toggleDiscard(i, cardEl);
-              };
-            }
-          } else {
-            cardEl = renderCardBack();
-          }
-          cardsDiv.appendChild(cardEl);
-        }
-        pDiv.appendChild(cardsDiv);
-
-        pDiv.appendChild(document.createTextNode(` ${p.name} ${p.folded ? '(Folded)' : ''}`));
-        playersDiv.appendChild(pDiv);
-      }
-
-      updateActionButtons();
-    });
-
-    function renderCard(card) {
-      const el = document.createElement('div');
-      el.className = 'card';
-      if (card.suit === '♥' || card.suit === '♦') el.classList.add('red');
-      el.textContent = card.rank + card.suit;
-      return el;
-    }
-    function renderCardBack() {
-      const el = document.createElement('div');
-      el.className = 'card back';
-      return el;
-    }
-
-    function toggleDiscard(i, cardEl) {
-      if (selectedDiscardIndices.includes(i)) {
-        selectedDiscardIndices = selectedDiscardIndices.filter(x => x !== i);
-        cardEl.classList.remove('selected');
-      } else {
-        if (selectedDiscardIndices.length >= 1) return; // only 1 discard allowed
-        selectedDiscardIndices.push(i);
-        cardEl.classList.add('selected');
-      }
-      discardBtn.disabled = selectedDiscardIndices.length !== 1;
-    }
-
-    discardBtn.onclick = () => {
-      if (selectedDiscardIndices.length !== 1) return;
-      socket.emit('playerAction', { roomId: ROOM_NAME, action: 'discard', discardIndices: selectedDiscardIndices });
-      selectedDiscardIndices = [];
-      discardBtn.disabled = true;
-    };
-
-    foldBtn.onclick = () => {
-      if (!isMyTurn()) return alert("Not your turn.");
-      socket.emit('playerAction', { roomId: ROOM_NAME, action: 'fold' });
-    };
-
-    checkBtn.onclick = () => {
-      if (!isMyTurn()) return alert("Not your turn.");
-      socket.emit('playerAction', { roomId: ROOM_NAME, action: 'check' });
-    };
-
-    callBtn.onclick = () => {
-      if (!isMyTurn()) return alert("Not your turn.");
-      socket.emit('playerAction', { roomId: ROOM_NAME, action: 'call' });
-    };
-
-    raiseBtn.onclick = () => {
-      if (!isMyTurn()) return alert("Not your turn.");
-      const amount = parseInt(raiseAmountInput.value);
-      if (!amount || amount <= 0) {
-        alert("Enter valid raise amount.");
-        return;
-      }
-      socket.emit('playerAction', { roomId: ROOM_NAME, action: 'raise', amount });
-    };
-
-    function isMyTurn() {
-      return currentTurnId === myId;
-    }
-
-    function updateActionButtons() {
-      const isTurn = isMyTurn();
-      foldBtn.disabled = !isTurn;
-      checkBtn.disabled = !isTurn || phase?.endsWith('discard');
-      callBtn.disabled = !isTurn || phase?.endsWith('discard');
-      raiseBtn.disabled = !isTurn || phase?.endsWith('discard');
-      raiseAmountInput.disabled = !isTurn || phase?.endsWith('discard');
-      discardBtn.disabled = true; // enabled only on card select
-
-      if (!isTurn) {
-        statusDiv.textContent = `Waiting for other players...`;
-      }
-    }
-  </script>
-</body>
-</html>
+        if (p.isDealer
