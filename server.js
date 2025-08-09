@@ -66,6 +66,7 @@ io.on('connection', (socket) => {
         bets: {},
         discards: {},
         dealerIndex: -1,
+        startingTurnIndex: 0,
       };
     }
     const room = rooms[roomId];
@@ -136,7 +137,6 @@ io.on('connection', (socket) => {
       case 'fold':
         player.folded = true;
         room.bets[player.id] = room.bets[player.id] || 0;
-        // Add their bet to pot
         room.pot += room.bets[player.id];
         room.bets[player.id] = 0;
         nextTurn(roomId);
@@ -221,7 +221,7 @@ function startHand(roomId) {
   // Rotate dealer
   room.dealerIndex = (room.dealerIndex + 1) % room.players.length;
 
-  // Reset folded state
+  // Reset folded state and deal 5 cards
   for (const p of room.players) {
     p.folded = false;
     p.hand = room.deck.splice(0, 5);
@@ -244,6 +244,7 @@ function startHand(roomId) {
 
   room.currentBet = BIG_BLIND;
   room.turnIndex = (bigBlindIndex + 1) % room.players.length;
+  room.startingTurnIndex = room.turnIndex;
 
   room.phase = 'pre-flop-betting';
 
@@ -275,7 +276,7 @@ function advancePhase(roomId) {
     case 'flop-discard':
     case 'turn-discard':
     case 'river-discard':
-      // handled by promptDiscard and playerAction
+      // Waiting on players to discard - turn set in promptDiscard
       break;
 
     case 'flop-betting':
@@ -283,7 +284,8 @@ function advancePhase(roomId) {
     case 'river-betting':
       room.currentBet = 0;
       room.bets = {};
-      room.turnIndex = 0;
+      room.discards = {};
+      room.startingTurnIndex = room.turnIndex; // Important!
       emitGameState(roomId);
       promptPlayerAction(roomId);
       break;
@@ -339,12 +341,9 @@ function nextTurn(roomId) {
 
   room.turnIndex = nextIndex;
 
-  // Check if betting round complete: all active players bets equal currentBet
   const activePlayers = room.players.filter(p => !p.folded);
   if (activePlayers.length <= 1) {
-    // Hand over if only one player remains
     io.to(room.players[0].id).emit('status', 'You win! Others folded.');
-    // Restart after short delay
     setTimeout(() => startHand('iowa-room'), 5000);
     return;
   }
@@ -353,8 +352,11 @@ function nextTurn(roomId) {
   const maxBet = Math.max(...bets);
   const allEqual = bets.every(b => b === maxBet);
 
-  // If all active players have matched current bet and we returned to starting player, advance phase
-  if (allEqual && nextIndex === activePlayers.findIndex(p => p.id === room.players[prevIndex].id)) {
+  if (
+    allEqual &&
+    maxBet === room.currentBet &&
+    room.turnIndex === room.startingTurnIndex
+  ) {
     advancePhase(roomId);
   } else {
     promptPlayerAction(roomId);
