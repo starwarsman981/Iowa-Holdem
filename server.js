@@ -36,7 +36,7 @@ const rooms = {}; // roomId: { players, deck, community, pot, phase, turnIndex, 
 io.on('connection', (socket) => {
   console.log(`Player connected: ${socket.id}`);
 
-  socket.on('joinRoom', (roomId) => {
+  socket.on('joinRoom', ({ roomId, name }) => {
     if (!rooms[roomId]) {
       rooms[roomId] = {
         players: [],
@@ -58,15 +58,21 @@ io.on('connection', (socket) => {
       return;
     }
 
-    room.players.push({ id: socket.id, hand: [], chips: 1000, folded: false });
+    if (room.players.find(p => p.id === socket.id)) {
+      // Already in room, ignore
+      return;
+    }
+
+    room.players.push({ id: socket.id, name: name || 'Anon', hand: [], chips: 1000, folded: false });
     socket.join(roomId);
-    console.log(`${socket.id} joined room ${roomId}`);
+    console.log(`${socket.id} (${name}) joined room ${roomId}`);
 
     // Send players list and their chips/hands (hands only to self)
     for (let p of room.players) {
       io.to(p.id).emit('gameState', {
         players: room.players.map(pl => ({
           id: pl.id,
+          name: pl.name,
           chips: pl.chips,
           folded: pl.folded,
           hand: pl.id === p.id ? pl.hand : Array(pl.hand.length).fill(null),
@@ -136,20 +142,17 @@ io.on('connection', (socket) => {
       nextTurn(roomId);
     }
     else if (action === 'discard') {
-      // Must be after betting round on flop, turn, river
       if (!discardIndices || !Array.isArray(discardIndices)) {
         socket.emit('errorMessage', 'Discard indices required');
         return;
       }
       if (!room.discards[player.id]) room.discards[player.id] = 0;
 
-      // Remove cards from player.hand at discardIndices
-      // Discard exactly one card
       if (discardIndices.length !== 1) {
         socket.emit('errorMessage', 'Must discard exactly one card');
         return;
       }
-      // Remove card(s) from hand (indices descending to not mess indexes)
+
       discardIndices.sort((a,b) => b - a).forEach(idx => {
         if (idx < 0 || idx >= player.hand.length) return;
         player.hand.splice(idx,1);
@@ -167,7 +170,6 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log(`Player disconnected: ${socket.id}`);
-    // Remove player from all rooms
     for (let roomId in rooms) {
       const room = rooms[roomId];
       const idx = room.players.findIndex(p => p.id === socket.id);
@@ -176,11 +178,9 @@ io.on('connection', (socket) => {
         room.foldedPlayers.delete(socket.id);
         delete room.bets[socket.id];
         delete room.discards[socket.id];
-        // If no players left, delete room
         if (room.players.length === 0) {
           delete rooms[roomId];
         } else {
-          // If current turn player left, move turn
           if (room.turnIndex >= room.players.length) room.turnIndex = 0;
           emitGameState(roomId);
         }
@@ -201,9 +201,7 @@ function startGame(roomId) {
   room.bets = {};
   room.discards = {};
   room.turnIndex = 0;
-  // Reset players folded and chips if new game? Here we keep chips for now.
 
-  // Deal 5 cards each
   for (let p of room.players) {
     p.hand = room.deck.splice(0,5);
     p.folded = false;
@@ -218,26 +216,22 @@ function nextTurn(roomId) {
   const room = rooms[roomId];
   if (!room) return;
 
-  // Find next player not folded
   let nextIndex = room.turnIndex;
   let attempts = 0;
   do {
     nextIndex = (nextIndex + 1) % room.players.length;
     attempts++;
-    if (attempts > room.players.length) break; // no one left?
+    if (attempts > room.players.length) break;
   } while (room.players[nextIndex].folded);
 
   room.turnIndex = nextIndex;
 
-  // Check if betting round over: all bets equal or folded
   const activePlayers = room.players.filter(p => !p.folded);
   const bets = activePlayers.map(p => room.bets[p.id] || 0);
-  const minBet = Math.min(...bets);
   const maxBet = Math.max(...bets);
   const allEqual = bets.every(b => b === maxBet);
 
   if (allEqual && room.turnIndex === room.players.findIndex(p => !p.folded)) {
-    // End betting round, advance phase or showdown
     advancePhase(roomId);
   } else {
     promptPlayerAction(roomId);
@@ -248,17 +242,14 @@ function advancePhase(roomId) {
   const room = rooms[roomId];
   const currentPhaseIndex = PHASES.indexOf(room.phase);
   if (currentPhaseIndex === PHASES.length -1) {
-    // Showdown - TODO: evaluate hands and decide winner
     room.phase = 'showdown';
     io.to(roomId).emit('showdown', room);
   } else {
-    // Advance phase
     room.phase = PHASES[currentPhaseIndex + 1];
     room.currentBet = 0;
     room.bets = {};
     room.discards = {};
 
-    // Reveal community cards accordingly
     if (room.phase === 'flop') {
       room.community = room.deck.splice(0,3);
     } else if (room.phase === 'turn' || room.phase === 'river') {
@@ -285,6 +276,7 @@ function emitGameState(roomId) {
     io.to(p.id).emit('gameState', {
       players: room.players.map(pl => ({
         id: pl.id,
+        name: pl.name,
         chips: pl.chips,
         folded: pl.folded,
         hand: pl.id === p.id ? pl.hand : Array(pl.hand.length).fill(null),
