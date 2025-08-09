@@ -93,11 +93,19 @@ socket.on('turn', (playerId) => {
 });
 
 socket.on('yourTurn', ({ phase: p, currentBet }) => {
-  statusDiv.textContent = `Your turn! Phase: ${p}, Current bet to call: ${currentBet}`;
+  if (p === 'discard') {
+    statusDiv.textContent = `Your turn! Discard exactly one card.`;
+  } else {
+    statusDiv.textContent = `Your turn! Phase: ${p}, Current bet to call: ${currentBet}`;
+  }
 });
 
 socket.on('errorMessage', msg => {
   alert(msg);
+});
+
+socket.on('status', msg => {
+  statusDiv.textContent = msg;
 });
 
 function renderCommunity(cards) {
@@ -114,7 +122,7 @@ function renderPlayers(players) {
   playersDiv.innerHTML = '';
   players.forEach(p => {
     const pDiv = document.createElement('div');
-    pDiv.textContent = `Player ${p.name || p.id}${p.id === myId ? ' (You)' : ''} - Chips: ${p.chips} ${p.folded ? '[Folded]' : ''} Bet: ${p.bet}`;
+    pDiv.textContent = `Player ${p.name}${p.id === myId ? ' (You)' : ''} - Chips: ${p.chips} ${p.folded ? '[Folded]' : ''} Bet: ${p.bet}`;
     if (p.hand) {
       const handDiv = document.createElement('div');
       handDiv.style.margin = '5px 0';
@@ -122,7 +130,7 @@ function renderPlayers(players) {
         const cardEl = document.createElement('div');
         cardEl.className = 'card';
         cardEl.textContent = card ? card.rank + card.suit : '🂠';
-        if (p.id === myId && (phase === 'turn' || phase === 'river') && !p.folded) {
+        if (p.id === myId && phase && phase.endsWith('discard') && !p.folded) {
           cardEl.style.cursor = 'pointer';
           cardEl.onclick = () => toggleDiscard(i, cardEl);
         }
@@ -152,47 +160,4 @@ function toggleDiscard(idx, cardEl) {
 function updateActions() {
   if (myId === currentTurnId) {
     actionsDiv.classList.remove('disabled');
-    if (phase === 'turn' || phase === 'river') {
-      discardBtn.classList.remove('disabled');
-    } else {
-      discardBtn.classList.add('disabled');
-    }
-  } else {
-    actionsDiv.classList.add('disabled');
-  }
-}
-
-foldBtn.onclick = () => {
-  socket.emit('playerAction', { roomId: ROOM_NAME, action: 'fold' });
-};
-
-checkBtn.onclick = () => {
-  socket.emit('playerAction', { roomId: ROOM_NAME, action: 'check' });
-};
-
-callBtn.onclick = () => {
-  socket.emit('playerAction', { roomId: ROOM_NAME, action: 'call' });
-};
-
-raiseBtn.onclick = () => {
-  const amount = parseInt(raiseAmountInput.value);
-  if (isNaN(amount) || amount <= 0) {
-    alert('Enter a valid raise amount');
-    return;
-  }
-  socket.emit('playerAction', { roomId: ROOM_NAME, action: 'raise', amount });
-};
-
-discardBtn.onclick = () => {
-  if (selectedDiscardIndices.length !== 1) {
-    alert('Select exactly one card to discard');
-    return;
-  }
-  socket.emit('playerAction', { roomId: ROOM_NAME, action: 'discard', discardIndices: selectedDiscardIndices });
-  selectedDiscardIndices = [];
-  discardBtn.classList.add('disabled');
-};
-
-</script>
-</body>
-</html>
+    if (phase &&
